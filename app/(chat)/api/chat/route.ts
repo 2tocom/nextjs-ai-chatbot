@@ -9,10 +9,6 @@ import {
 } from "ai";
 import { unstable_cache as cache } from "next/cache";
 import { after } from "next/server";
-import {
-  createResumableStreamContext,
-  type ResumableStreamContext,
-} from "resumable-stream";
 import type { ModelCatalog } from "tokenlens/core";
 import { fetchModels } from "tokenlens/fetch";
 import { getUsage } from "tokenlens/helpers";
@@ -23,6 +19,7 @@ import type { ChatModel } from "@/lib/ai/models";
 import { type RequestHints, systemPrompt } from "@/lib/ai/prompts";
 import { myProvider } from "@/lib/ai/providers";
 import { createDocument } from "@/lib/ai/tools/create-document";
+import { createFileSearchTool } from "@/lib/ai/tools/file-search";
 import { getWeather } from "@/lib/ai/tools/get-weather";
 import { requestSuggestions } from "@/lib/ai/tools/request-suggestions";
 import { updateDocument } from "@/lib/ai/tools/update-document";
@@ -47,8 +44,6 @@ import { type PostRequestBody, postRequestBodySchema } from "./schema";
 
 export const maxDuration = 60;
 
-let globalStreamContext: ResumableStreamContext | null = null;
-
 const getTokenlensCatalog = cache(
   async (): Promise<ModelCatalog | undefined> => {
     try {
@@ -64,26 +59,6 @@ const getTokenlensCatalog = cache(
   ["tokenlens-catalog"],
   { revalidate: 24 * 60 * 60 } // 24 hours
 );
-
-export function getStreamContext() {
-  if (!globalStreamContext) {
-    try {
-      globalStreamContext = createResumableStreamContext({
-        waitUntil: after,
-      });
-    } catch (error: any) {
-      if (error.message.includes("REDIS_URL")) {
-        console.log(
-          " > Resumable streams are disabled due to missing REDIS_URL"
-        );
-      } else {
-        console.error(error);
-      }
-    }
-  }
-
-  return globalStreamContext;
-}
 
 export async function POST(request: Request) {
   let requestBody: PostRequestBody;
@@ -101,11 +76,13 @@ export async function POST(request: Request) {
       message,
       selectedChatModel,
       selectedVisibilityType,
+      selectedFileSearchStore,
     }: {
       id: string;
       message: ChatMessage;
       selectedChatModel: ChatModel["id"];
       selectedVisibilityType: VisibilityType;
+      selectedFileSearchStore?: string | null;
     } = requestBody;
 
     const session = await auth();
@@ -192,6 +169,7 @@ export async function POST(request: Request) {
                   "createDocument",
                   "updateDocument",
                   "requestSuggestions",
+                  ...(selectedFileSearchStore ? ["fileSearch"] : []),
                 ],
           experimental_transform: smoothStream({ chunking: "word" }),
           tools: {
@@ -202,6 +180,13 @@ export async function POST(request: Request) {
               session,
               dataStream,
             }),
+            ...(selectedFileSearchStore
+              ? {
+                  fileSearch: createFileSearchTool({
+                    storeName: selectedFileSearchStore,
+                  }),
+                }
+              : {}),
           },
           experimental_telemetry: {
             isEnabled: isProductionEnvironment,
@@ -273,20 +258,16 @@ export async function POST(request: Request) {
           }
         }
       },
-      onError: () => {
-        return "Oops, an error occurred!";
+      onError: (error) => {
+        if (error instanceof Error) {
+          const msg = error.message?.toLowerCase() ?? "";
+          if (msg.includes("quota") || msg.includes("rate") || msg.includes("429")) {
+            return "⚠️ Đã vượt quá giới hạn API. Vui lòng đợi vài giây và thử lại.";
+          }
+        }
+        return "Oops, có lỗi xảy ra! Vui lòng thử lại.";
       },
     });
-
-    // const streamContext = getStreamContext();
-
-    // if (streamContext) {
-    //   return new Response(
-    //     await streamContext.resumableStream(streamId, () =>
-    //       stream.pipeThrough(new JsonToSseTransformStream())
-    //     )
-    //   );
-    // }
 
     return new Response(stream.pipeThrough(new JsonToSseTransformStream()));
   } catch (error) {
@@ -304,6 +285,22 @@ export async function POST(request: Request) {
       )
     ) {
       return new ChatSDKError("bad_request:activate_gateway").toResponse();
+    }
+
+    // Check for Gemini API quota/rate limit errors
+    if (error instanceof Error) {
+      console.warn("Gemini API error:", error);
+      const errorMessage = error.message?.toLowerCase() ?? "";
+      const isQuotaError =
+        errorMessage.includes("quota") ||
+        errorMessage.includes("rate limit") ||
+        errorMessage.includes("resource_exhausted") ||
+        errorMessage.includes("429");
+
+      if (isQuotaError) {
+        console.warn("Gemini API quota exceeded:", error.message);
+        return new ChatSDKError("rate_limit:ai_quota").toResponse();
+      }
     }
 
     console.error("Unhandled error in chat API:", error, { vercelId });

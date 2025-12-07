@@ -1,21 +1,20 @@
-import { put } from "@vercel/blob";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { auth } from "@/app/(auth)/auth";
 
-// Use Blob instead of File since File is not available in Node.js environment
+// Validation schema for file upload
 const FileSchema = z.object({
   file: z
     .instanceof(Blob)
-    .refine((file) => file.size <= 5 * 1024 * 1024, {
-      message: "File size should be less than 5MB",
-    })
-    // Update the file type based on the kind of files you want to accept
-    .refine((file) => ["image/jpeg", "image/png"].includes(file.type), {
-      message: "File type should be JPEG or PNG",
+    .refine((file) => file.size <= 100 * 1024 * 1024, {
+      message: "File size should be less than 100MB",
     }),
 });
+
+// This endpoint is a placeholder for Gemini File Search Store integration
+// File uploads will be handled directly via Gemini File Search API
+// See: https://ai.google.dev/gemini-api/docs/file-search
 
 export async function POST(request: Request) {
   const session = await auth();
@@ -48,17 +47,19 @@ export async function POST(request: Request) {
 
     // Get filename from formData since Blob doesn't have name property
     const filename = (formData.get("file") as File).name;
-    const fileBuffer = await file.arrayBuffer();
 
-    try {
-      const data = await put(`${filename}`, fileBuffer, {
-        access: "public",
-      });
+    // TODO: Integrate with Gemini File Search Store
+    // For now, return file metadata without storing
+    // The actual file upload to Gemini File Search Store will be implemented
+    // when you add the file management features
 
-      return NextResponse.json(data);
-    } catch (_error) {
-      return NextResponse.json({ error: "Upload failed" }, { status: 500 });
-    }
+    return NextResponse.json({
+      name: filename,
+      size: file.size,
+      type: file.type,
+      message:
+        "File received. Gemini File Search Store integration pending implementation.",
+    });
   } catch (_error) {
     return NextResponse.json(
       { error: "Failed to process request" },

@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import useSWR, { useSWRConfig } from "swr";
 import { unstable_serialize } from "swr/infinite";
 import { ChatHeader } from "@/components/chat-header";
+import { useFileSearchStore } from "@/components/file-search";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -76,10 +77,16 @@ export function Chat({
   const [showCreditCardAlert, setShowCreditCardAlert] = useState(false);
   const [currentModelId, setCurrentModelId] = useState(initialChatModel);
   const currentModelIdRef = useRef(currentModelId);
+  const { selectedStore } = useFileSearchStore();
+  const selectedStoreRef = useRef(selectedStore);
 
   useEffect(() => {
     currentModelIdRef.current = currentModelId;
   }, [currentModelId]);
+
+  useEffect(() => {
+    selectedStoreRef.current = selectedStore;
+  }, [selectedStore]);
 
   const {
     messages,
@@ -104,6 +111,7 @@ export function Chat({
             message: request.messages.at(-1),
             selectedChatModel: currentModelIdRef.current,
             selectedVisibilityType: visibilityType,
+            selectedFileSearchStore: selectedStoreRef.current,
             ...request.body,
           },
         };
