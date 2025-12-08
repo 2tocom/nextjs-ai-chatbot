@@ -1,4 +1,5 @@
 import "server-only";
+import { GoogleGenAI } from "@google/genai";
 
 const GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta";
 
@@ -8,6 +9,17 @@ const getApiKey = () => {
     throw new Error("GOOGLE_GENERATIVE_AI_API_KEY is not set");
   }
   return apiKey;
+};
+
+// Singleton Gemini client (using any due to incomplete SDK types for fileSearchStores)
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let geminiClient: any = null;
+
+const getGeminiClient = () => {
+  if (!geminiClient) {
+    geminiClient = new GoogleGenAI({ apiKey: getApiKey() });
+  }
+  return geminiClient;
 };
 
 // ==========================================
@@ -127,99 +139,80 @@ export interface UploadDocumentOptions {
   fileBuffer: Buffer;
   displayName: string;
   mimeType?: string;
-  customMetadata?: Array<{ key: string; stringValue?: string; numericValue?: number }>;
+  customMetadata?: Array<{
+    key: string;
+    stringValue?: string;
+    numericValue?: number;
+  }>;
 }
 
 export async function uploadDocument(
   options: UploadDocumentOptions
 ): Promise<{ operationName: string }> {
-  const apiKey = getApiKey();
-
   if (!options.fileBuffer || options.fileBuffer.byteLength === 0) {
     throw new Error("Uploaded file is empty or missing.");
   }
 
-  const contentType = options.mimeType ?? "application/octet-stream";
-  const uploadUrl = `${GEMINI_API_BASE.replace(
-    "/v1beta",
-    ""
-  )}/upload/v1beta/files?key=${apiKey}&uploadType=multipart`;
+  // Use SDK for upload - requires temp file
+  const ai = getGeminiClient();
+  const fs = await import("node:fs/promises");
+  const path = await import("node:path");
+  const os = await import("node:os");
 
-  // Create file metadata
-  const metadata = {
-    file: {
+  // Create temp file
+  const timestamp = Date.now();
+  const safeFilename = options.displayName.replace(/[^a-zA-Z0-9.-]/g, "_");
+  const tempFilePath = path.join(os.tmpdir(), `${timestamp}-${safeFilename}`);
+
+  try {
+    // Write buffer to temp file
+    await fs.writeFile(tempFilePath, options.fileBuffer);
+
+    // Build upload config
+    const uploadConfig: {
+      displayName: string;
+      customMetadata?: Array<{
+        key: string;
+        stringValue?: string;
+        numericValue?: number;
+      }>;
+    } = {
       displayName: options.displayName,
-    },
-  };
+    };
 
-  // Multipart upload
-  const boundary = "---BOUNDARY" + Date.now();
-  const metadataJson = JSON.stringify(metadata);
-
-  const body = Buffer.concat([
-    Buffer.from(
-      `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${metadataJson}\r\n`
-    ),
-    Buffer.from(
-      `--${boundary}\r\nContent-Type: ${contentType}\r\nContent-Disposition: form-data; name="file"; filename="${options.displayName}"\r\n\r\n`
-    ),
-    options.fileBuffer,
-    Buffer.from(`\r\n--${boundary}--`),
-  ]);
-
-  // Upload file first
-  const uploadResponse = await fetch(
-    uploadUrl,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": `multipart/related; boundary=${boundary}`,
-        "Content-Length": String(body.byteLength),
-      },
-      body,
+    // Add custom metadata if provided
+    if (options.customMetadata && options.customMetadata.length > 0) {
+      uploadConfig.customMetadata = options.customMetadata.map((item) => ({
+        key: item.key,
+        ...(item.stringValue !== undefined
+          ? { stringValue: item.stringValue }
+          : {}),
+        ...(item.numericValue !== undefined
+          ? { numericValue: item.numericValue }
+          : {}),
+      }));
     }
-  );
 
-  if (!uploadResponse.ok) {
-    const error = await uploadResponse.text();
-    throw new Error(`Failed to upload file: ${error}`);
+    // Upload using SDK's uploadToFileSearchStore
+    const operation = await ai.fileSearchStores.uploadToFileSearchStore({
+      file: tempFilePath,
+      fileSearchStoreName: options.storeName,
+      config: uploadConfig,
+    });
+
+    // Clean up temp file
+    await fs
+      .unlink(tempFilePath)
+      .catch((e) => console.warn("Cleanup failed:", e));
+
+    return { operationName: operation.name ?? "" };
+  } catch (error) {
+    // Clean up temp file on error
+    await fs
+      .unlink(tempFilePath)
+      .catch((e) => console.warn("Cleanup failed:", e));
+    throw error;
   }
-
-  const uploadData = await uploadResponse.json();
-  const fileName = uploadData.file?.name;
-
-  if (!fileName) {
-    throw new Error("No file name returned from upload");
-  }
-
-  // Now import the uploaded file to the store using importFile API
-  // REST shape (v1beta): top-level fields, not nested config
-  const importBody: {
-    fileName: string;
-    customMetadata?:
-      | Array<{ key: string; stringValue?: string; numericValue?: number }>
-      | undefined;
-  } = {
-    fileName,
-    customMetadata: options.customMetadata,
-  };
-
-  const importResponse = await fetch(
-    `${GEMINI_API_BASE}/${options.storeName}:importFile?key=${apiKey}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(importBody),
-    }
-  );
-
-  if (!importResponse.ok) {
-    const error = await importResponse.text();
-    throw new Error(`Failed to import file to store: ${error}`);
-  }
-
-  const importData = await importResponse.json();
-  return { operationName: importData.name ?? "" };
 }
 
 export async function listDocuments(
@@ -302,18 +295,43 @@ export interface RagChatOptions {
   metadataFilter?: string;
 }
 
-export interface RagChatResponse {
-  text: string;
-  citations?: Array<{
-    documentDisplayName?: string;
+// Grounding types for citations
+export interface GroundingChunk {
+  web?: {
+    uri: string;
+    title?: string;
+  };
+  retrievedContext?: {
     uri?: string;
-  }>;
-  groundingMetadata?: unknown;
+    title?: string;
+    text?: string;
+  };
 }
 
-export async function ragChat(options: RagChatOptions): Promise<RagChatResponse> {
+export interface GroundingMetadata {
+  groundingChunks?: GroundingChunk[];
+  groundingSupports?: Array<{
+    segment?: {
+      startIndex?: number;
+      endIndex?: number;
+      text?: string;
+    };
+    groundingChunkIndices?: number[];
+    confidenceScores?: number[];
+  }>;
+}
+
+export interface RagChatResponse {
+  text: string;
+  model: string;
+  groundingMetadata?: GroundingMetadata;
+}
+
+export async function ragChat(
+  options: RagChatOptions
+): Promise<RagChatResponse> {
   const apiKey = getApiKey();
-  const model = options.model ?? "gemini-2.0-flash-lite";
+  const model = options.model ?? "gemini-2.5-flash";
 
   const fileSearchConfig: {
     fileSearchStoreNames: string[];
@@ -357,20 +375,10 @@ export async function ragChat(options: RagChatOptions): Promise<RagChatResponse>
   // Extract text from response
   const text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
 
-  // Extract citations from grounding metadata
-  const citations: RagChatResponse["citations"] = [];
-  const groundingMetadata = data.candidates?.[0]?.groundingMetadata;
+  // Extract grounding metadata with full citation info
+  const groundingMetadata = data.candidates?.[0]?.groundingMetadata as
+    | GroundingMetadata
+    | undefined;
 
-  if (groundingMetadata?.groundingChunks) {
-    for (const chunk of groundingMetadata.groundingChunks) {
-      if (chunk.retrievedContext) {
-        citations.push({
-          documentDisplayName: chunk.retrievedContext.title,
-          uri: chunk.retrievedContext.uri,
-        });
-      }
-    }
-  }
-
-  return { text, citations, groundingMetadata };
+  return { text, model, groundingMetadata };
 }

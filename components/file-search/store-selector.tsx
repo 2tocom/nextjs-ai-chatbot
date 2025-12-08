@@ -1,5 +1,8 @@
 "use client";
 
+import { DatabaseIcon, Loader2Icon, PlusIcon } from "lucide-react";
+import { useEffect, useState } from "react";
+import useSWR from "swr";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -9,9 +12,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { DatabaseIcon, Loader2Icon, PlusIcon } from "lucide-react";
-import { useEffect, useState } from "react";
-import useSWR from "swr";
 import { fetcher } from "@/lib/utils";
 
 interface FileSearchStore {
@@ -62,9 +62,9 @@ export function StoreSelector({
       <DropdownMenuContent align="start" className="w-64">
         <DropdownMenuLabel>File Search Stores</DropdownMenuLabel>
         <DropdownMenuSeparator />
-        
+
         {stores.length === 0 && !isLoading && (
-          <div className="px-2 py-3 text-center text-sm text-muted-foreground">
+          <div className="px-2 py-3 text-center text-muted-foreground text-sm">
             Chưa có store nào
           </div>
         )}
@@ -75,9 +75,11 @@ export function StoreSelector({
             onClick={() => onSelectStore(store.name)}
           >
             <div className="flex w-full items-center justify-between">
-              <span className="truncate">{store.displayName ?? store.name}</span>
+              <span className="truncate">
+                {store.displayName ?? store.name}
+              </span>
               {store.activeDocumentsCount !== undefined && (
-                <span className="ml-2 text-xs text-muted-foreground">
+                <span className="ml-2 text-muted-foreground text-xs">
                   {store.activeDocumentsCount} docs
                 </span>
               )}
@@ -108,15 +110,26 @@ export function StoreSelector({
   );
 }
 
-// Hook for managing store selection state
+// Hook for managing store selection state with options
 export function useFileSearchStore() {
   const [selectedStore, setSelectedStore] = useState<string | null>(null);
+  const [metadataFilter, setMetadataFilter] = useState<string>("");
+  const [fileSearchModel, setFileSearchModel] =
+    useState<string>("gemini-2.5-flash");
 
   // Persist selection in sessionStorage
   useEffect(() => {
     const saved = sessionStorage.getItem("selectedFileSearchStore");
     if (saved) {
       setSelectedStore(saved);
+    }
+    const savedFilter = sessionStorage.getItem("fileSearchMetadataFilter");
+    if (savedFilter) {
+      setMetadataFilter(savedFilter);
+    }
+    const savedModel = sessionStorage.getItem("fileSearchModel");
+    if (savedModel) {
+      setFileSearchModel(savedModel);
     }
   }, []);
 
@@ -129,6 +142,26 @@ export function useFileSearchStore() {
     }
   };
 
-  return { selectedStore, selectStore };
-}
+  const updateMetadataFilter = (filter: string) => {
+    setMetadataFilter(filter);
+    if (filter) {
+      sessionStorage.setItem("fileSearchMetadataFilter", filter);
+    } else {
+      sessionStorage.removeItem("fileSearchMetadataFilter");
+    }
+  };
 
+  const updateFileSearchModel = (model: string) => {
+    setFileSearchModel(model);
+    sessionStorage.setItem("fileSearchModel", model);
+  };
+
+  return {
+    selectedStore,
+    selectStore,
+    metadataFilter,
+    updateMetadataFilter,
+    fileSearchModel,
+    updateFileSearchModel,
+  };
+}

@@ -1,6 +1,6 @@
+import { NextResponse } from "next/server";
 import { auth } from "@/app/(auth)/auth";
 import { listDocuments, uploadDocument } from "@/lib/gemini/file-search";
-import { NextResponse } from "next/server";
 
 // GET /api/file-search/documents?store=... - List documents in a store
 export async function GET(request: Request) {
@@ -58,8 +58,28 @@ export async function POST(request: Request) {
     const arrayBuffer = await file.arrayBuffer();
     const fileBuffer = Buffer.from(arrayBuffer);
 
+    // Log file info for debugging
+    console.log("Upload request:", {
+      fileName: file.name,
+      fileSize: file.size,
+      fileType: file.type,
+      bufferSize: fileBuffer.byteLength,
+      storeName,
+      displayName,
+    });
+
+    // Check if file is empty
+    if (fileBuffer.byteLength === 0) {
+      return NextResponse.json(
+        { error: "File is empty. Please select a valid file." },
+        { status: 400 }
+      );
+    }
+
     // Parse custom metadata
-    let customMetadata: Array<{ key: string; stringValue?: string; numericValue?: number }> | undefined;
+    let customMetadata:
+      | Array<{ key: string; stringValue?: string; numericValue?: number }>
+      | undefined;
     if (customMetadataStr) {
       try {
         const parsed = JSON.parse(customMetadataStr);
@@ -93,12 +113,9 @@ export async function POST(request: Request) {
     return NextResponse.json(
       {
         error:
-          error instanceof Error
-            ? error.message
-            : "Failed to upload document",
+          error instanceof Error ? error.message : "Failed to upload document",
       },
       { status: 500 }
     );
   }
 }
-

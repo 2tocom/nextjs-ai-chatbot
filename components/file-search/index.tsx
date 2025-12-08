@@ -57,4 +57,5 @@ export { StoreSelector, useFileSearchStore } from "./store-selector";
 export { StoreManager } from "./store-manager";
 export { FileUpload } from "./file-upload";
 export { DocumentList } from "./document-list";
-
+export { CitationList } from "./citation-list";
+export { FileSearchSettings } from "./file-search-settings";

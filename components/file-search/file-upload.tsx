@@ -234,6 +234,11 @@ export function FileUpload({
     updateFile(queuedFile.id, { status: "uploading" });
 
     try {
+      // Validate file before upload
+      if (!queuedFile.file || queuedFile.file.size === 0) {
+        throw new Error("File is empty or invalid");
+      }
+
       const formData = new FormData();
       formData.append("file", queuedFile.file);
       formData.append("storeName", storeName);
@@ -264,7 +269,8 @@ export function FileUpload({
       });
 
       if (!response.ok) {
-        throw new Error("Upload failed");
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || "Upload failed");
       }
 
       const data = await response.json();

@@ -77,8 +77,11 @@ export function Chat({
   const [showCreditCardAlert, setShowCreditCardAlert] = useState(false);
   const [currentModelId, setCurrentModelId] = useState(initialChatModel);
   const currentModelIdRef = useRef(currentModelId);
-  const { selectedStore } = useFileSearchStore();
+  const { selectedStore, metadataFilter, fileSearchModel } =
+    useFileSearchStore();
   const selectedStoreRef = useRef(selectedStore);
+  const metadataFilterRef = useRef(metadataFilter);
+  const fileSearchModelRef = useRef(fileSearchModel);
 
   useEffect(() => {
     currentModelIdRef.current = currentModelId;
@@ -87,6 +90,14 @@ export function Chat({
   useEffect(() => {
     selectedStoreRef.current = selectedStore;
   }, [selectedStore]);
+
+  useEffect(() => {
+    metadataFilterRef.current = metadataFilter;
+  }, [metadataFilter]);
+
+  useEffect(() => {
+    fileSearchModelRef.current = fileSearchModel;
+  }, [fileSearchModel]);
 
   const {
     messages,
@@ -112,6 +123,8 @@ export function Chat({
             selectedChatModel: currentModelIdRef.current,
             selectedVisibilityType: visibilityType,
             selectedFileSearchStore: selectedStoreRef.current,
+            fileSearchMetadataFilter: metadataFilterRef.current || undefined,
+            fileSearchModel: fileSearchModelRef.current || undefined,
             ...request.body,
           },
         };

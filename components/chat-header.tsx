@@ -4,7 +4,10 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { memo } from "react";
 import { useWindowSize } from "usehooks-ts";
-import { FileSearchControls } from "@/components/file-search";
+import {
+  FileSearchControls,
+  FileSearchSettings,
+} from "@/components/file-search";
 import { SidebarToggle } from "@/components/sidebar-toggle";
 import { Button } from "@/components/ui/button";
 import { PlusIcon, VercelIcon } from "./icons";
@@ -51,6 +54,7 @@ function PureChatHeader({
             selectedVisibilityType={selectedVisibilityType}
           />
           <FileSearchControls />
+          <FileSearchSettings />
         </>
       )}
 

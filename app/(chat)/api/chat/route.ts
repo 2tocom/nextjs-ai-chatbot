@@ -44,6 +44,11 @@ import { type PostRequestBody, postRequestBodySchema } from "./schema";
 
 export const maxDuration = 60;
 
+// Stub for stream context - resumable streams not implemented
+export function getStreamContext(): null {
+  return null;
+}
+
 const getTokenlensCatalog = cache(
   async (): Promise<ModelCatalog | undefined> => {
     try {
@@ -77,12 +82,16 @@ export async function POST(request: Request) {
       selectedChatModel,
       selectedVisibilityType,
       selectedFileSearchStore,
+      fileSearchMetadataFilter,
+      fileSearchModel,
     }: {
       id: string;
       message: ChatMessage;
       selectedChatModel: ChatModel["id"];
       selectedVisibilityType: VisibilityType;
       selectedFileSearchStore?: string | null;
+      fileSearchMetadataFilter?: string;
+      fileSearchModel?: string;
     } = requestBody;
 
     const session = await auth();
@@ -164,13 +173,13 @@ export async function POST(request: Request) {
           experimental_activeTools:
             selectedChatModel === "chat-model-reasoning"
               ? []
-              : [
+              : ([
                   "getWeather",
                   "createDocument",
                   "updateDocument",
                   "requestSuggestions",
-                  ...(selectedFileSearchStore ? ["fileSearch"] : []),
-                ],
+                  ...(selectedFileSearchStore ? (["fileSearch"] as const) : []),
+                ] as const),
           experimental_transform: smoothStream({ chunking: "word" }),
           tools: {
             getWeather,
@@ -184,6 +193,8 @@ export async function POST(request: Request) {
               ? {
                   fileSearch: createFileSearchTool({
                     storeName: selectedFileSearchStore,
+                    metadataFilter: fileSearchMetadataFilter,
+                    model: fileSearchModel,
                   }),
                 }
               : {}),
@@ -261,7 +272,11 @@ export async function POST(request: Request) {
       onError: (error) => {
         if (error instanceof Error) {
           const msg = error.message?.toLowerCase() ?? "";
-          if (msg.includes("quota") || msg.includes("rate") || msg.includes("429")) {
+          if (
+            msg.includes("quota") ||
+            msg.includes("rate") ||
+            msg.includes("429")
+          ) {
             return "⚠️ Đã vượt quá giới hạn API. Vui lòng đợi vài giây và thử lại.";
           }
         }

@@ -18,11 +18,16 @@ export async function GET(
   const { id: chatId } = await params;
 
   const streamContext = getStreamContext();
-  const resumeRequestedAt = new Date();
 
+  // Resumable streams not implemented - return empty response
   if (!streamContext) {
     return new Response(null, { status: 204 });
   }
+
+  // The code below is for future resumable stream implementation
+  // Currently getStreamContext() always returns null
+
+  const resumeRequestedAt = new Date();
 
   if (!chatId) {
     return new ChatSDKError("bad_request:api").toResponse();
@@ -67,6 +72,7 @@ export async function GET(
     execute: () => {},
   });
 
+  // @ts-expect-error - streamContext type is narrowed to never after null check
   const stream = await streamContext.resumableStream(recentStreamId, () =>
     emptyDataStream.pipeThrough(new JsonToSseTransformStream())
   );
